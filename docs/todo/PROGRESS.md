@@ -58,8 +58,8 @@ Three layers, all on this branch:
   exports no such name and the case still guards the row against any future
   collision of the same shape.
 
-The suite total moved to **65/65 on x86-64 and 61/61 on aarch64** with E102,
-and every one-home record moved with it: report 08, `gates.yml`,
+The suite total moved by one on both rows with E102. Report 08 owns the new
+numbers, and every one-home record moved with it: `gates.yml`,
 `scripts/verify-gates.sh` and that script's probe string.
 
 Measured locally besides the suite: the fixed x86-64 build exports the same
