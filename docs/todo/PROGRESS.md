@@ -52,11 +52,11 @@ Three layers, all on this branch:
   `version-compat.c`'s forwarders. `CLD_SYSROOT` names the target sysroot for
   a verification outside a build; that is how its refusal was proven on this
   x86-64 machine against the real bullseye arm64 cross libc.
-- **E102** is the suite's case, run on both rows of the evidence table. On the
-  aarch64 runner it FAILED before this branch and passes after; on x86-64 it
-  passes both ways, which is correct rather than toothless, because that libc
-  exports no such name and the case still guards the row against any future
-  collision of the same shape.
+- **E102** is the suite's case, run on both rows of the evidence table. Its
+  logic was proven against the real floor cross libc on this machine: the
+  released v0.2.5 aarch64 object makes it report `__stack_chk_guard` and the
+  fixed one reports nothing. The row on the ARM runner itself is the PR's CI
+  run, which is where E101's aarch64 number was measured too.
 
 The suite total moved by one on both rows with E102. Report 08 owns the new
 numbers, and every one-home record moved with it: `gates.yml`,
@@ -70,6 +70,14 @@ defect, the released v0.2.5 aarch64 object, makes both the gate and E102's
 logic refuse naming the symbol; the gate's `defined_names` was caught reading
 only the first member of the target list, which measured a whole pass against
 `libc.so.6` alone and reported the loader's canary absent.
+
+And measured on real silicon, in a consumer's CI rather than this
+repository's: an unmodified Helium AppImage build whose only change is
+compiling this branch and dropping the object into `AppDir/lib/sharun-preload`
+passes its packaged `--test` on aarch64 and x86-64, with zero GPU-process
+SIGSEGVs in both the `CROSS_LIBC_DLOPEN=0` control arm and the default arm,
+where the released object had six in each. The runs are linked from the pull
+request, because a fork's logs are not files this repository can cite.
 
 ### 2. What is still open
 
