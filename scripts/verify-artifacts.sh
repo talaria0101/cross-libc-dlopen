@@ -87,6 +87,123 @@ for pair in 'gl-fwd.so gl-fwd-gl.h' 'egl-fwd.so gl-fwd-egl.h' 'gles-fwd.so gl-fw
 		say "$so: SONAME $got_son, $got_n entry points"
 done
 
+# ------------------------------------------ the preload versus the target --
+# The FOURTH property, and it is about names rather than versions: the
+# preload exports nothing the target's own libc family exports, beyond the
+# two audited interpositions. An unversioned definition in a preload wins
+# the lookup for a versioned reference, so any other shared name silently
+# replaces the target's implementation for the WHOLE process. The
+# __stack_chk_guard case is the measured one: on aarch64, riscv64 and
+# loongarch64 the dynamic loader exports the name as the process-wide stack
+# canary, the shim defined it as a function stub, chromium's GPU process
+# died with SIGSEGV under the preload with the feature switch off, and
+# x86-64 and ppc64le were untouched because their loaders never export the
+# name (issue #37). The generator excludes it per architecture; this check
+# re-measures the built object so an architecture added later fails here
+# rather than in somebody's browser.
+#
+# The audited interpositions, exempt by name:
+#   dlopen                      the point of the project
+#   version-compat.c's forwarders deliberate, and each one forwards to the
+#                               default definition it displaced
+defined_names() {
+	# "$@" and not "$1": the target is a LIST (libc plus its loader), and a
+	# function that read only the first member once measured a whole gate
+	# against libc.so.6 alone and reported the loader's own canary absent.
+	readelf --dyn-syms -W "$@" 2>/dev/null |
+		awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") &&
+		     $6 == "DEFAULT" { n = $8; sub(/@.*/, "", n); print n }' |
+		sort -u
+}
+
+# The forwarder set, read out of the source that defines it so the two
+# cannot drift apart silently.
+forwarder_names() {
+	sed -n 's/^VC_VISIBLE .*[ *]\([A-Za-z_][A-Za-z0-9_]*\)(.*/\1/p' \
+		"$SRC/version-compat.c" 2>/dev/null | sort -u
+}
+
+if [ -f "$DIR/cross-libc-dlopen.so" ]; then
+	case "$ARCH" in
+		x86_64)      triplet=x86_64-linux-gnu ;;
+		i386)        triplet=i386-linux-gnu ;;
+		aarch64)     triplet=aarch64-linux-gnu ;;
+		riscv64)     triplet=riscv64-linux-gnu ;;
+		ppc64le)     triplet=powerpc64le-linux-gnu ;;
+		loongarch64) triplet=loongarch64-linux-gnu ;;
+		*) triplet='' ;;
+	esac
+	# Where the target's own libc family lives. The build container carries
+	# it in the cross sysroot, /usr/<triplet>/lib, and a native build carries
+	# it in this machine's own directories. CLD_SYSROOT names a sysroot root
+	# explicitly for a verification run outside a build, which is how the
+	# gate's own refusal below was proven on a machine of the other
+	# architecture.
+	SYSROOT=${CLD_SYSROOT:-}
+
+	targets=''
+	if [ -n "$triplet" ]; then
+		if [ -n "$SYSROOT" ]; then
+			for d in "$SYSROOT/lib" "$SYSROOT/lib64"; do
+				[ -d "$d" ] || continue
+				for f in "$d"/libc.so.6 "$d"/ld-linux*.so* \
+				         "$d"/ld64.so* "$d"/ld-[0-9]*.so; do
+					[ -f "$f" ] || continue
+					targets="$targets $f"
+				done
+			done
+		else
+		for d in "/usr/$triplet/lib" "/usr/$triplet/lib64" \
+		         "/lib/$triplet" "/usr/lib/$triplet"; do
+			[ -d "$d" ] || continue
+			for f in "$d"/libc.so.6 "$d"/ld-linux*.so* \
+			         "$d"/ld64.so* "$d"/ld-[0-9]*.so; do
+				[ -f "$f" ] || continue
+				targets="$targets $f"
+			done
+		done
+		# The triplet-less directories only carry THIS machine's libc, so
+		# they are consulted only when the target is the machine itself: a
+		# cross build on an x86-64 host would otherwise check its own
+		# libc.so.6 against an aarch64 artefact and report the wrong answer.
+		if [ "$(uname -m)" = "$ARCH" ]; then
+			for d in /lib/$triplet /usr/lib/$triplet /lib64 /usr/lib64 /lib /usr/lib; do
+				[ -d "$d" ] || continue
+				for f in "$d"/libc.so.6 "$d"/ld-linux*.so* \
+				         "$d"/ld64.so* "$d"/ld-[0-9]*.so; do
+					[ -f "$f" ] || continue
+					targets="$targets $f"
+				done
+			done
+		fi
+		fi
+	fi
+	if [ -z "$(printf '%s' "$targets" | tr -d ' ')" ]; then
+		say "cross-libc-dlopen.so: no $ARCH libc family found to check"
+		say "exports against, name collisions unverified"
+	else
+		defs=$(defined_names "$DIR/cross-libc-dlopen.so")
+		# shellcheck disable=SC2086
+		theirs=$(defined_names $targets)
+		{
+			printf '%s\n' dlopen cross_libc_dlopen_init_now
+			forwarder_names
+		} | sort -u > "$DIR/.cld-exempt.$$"
+		hits=$(printf '%s\n%s\n' "$defs" "$theirs" | sort | uniq -d |
+			grep -vxF -f "$DIR/.cld-exempt.$$" || true)
+		rm -f "$DIR/.cld-exempt.$$"
+		if [ -n "$hits" ]; then
+			for h in $hits; do
+				bad "cross-libc-dlopen.so exports '$h', which the target libc
+      family also exports. A preload definition wins every lookup for it,
+      the loader's own included. Issue #37."
+			done
+		else
+			say "cross-libc-dlopen.so: no name reexported from the target libc family"
+		fi
+	fi
+fi
+
 # ⭐ The endbr64 count, REPORTED rather than asserted. The trampolines spell
 # their endbr64 as literal bytes in gl-fwd.c so the floor's assembler cannot
 # be too old for them, and the build asks for no CET flag, so the count here

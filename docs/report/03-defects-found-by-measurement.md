@@ -1,4 +1,4 @@
-## 3. Six defects found by measurement
+## 3. Seven defects found by measurement
 
 None of these were in the problem statement. Each was found by running
 something, and each is fixed.
@@ -143,6 +143,48 @@ comment saying it makes no `dlerror()` call, which was true and not enough.
 
 **Fix:** re-run the load after the report, which puts the real message back.
 One extra failed `dlopen`, only in a trace run. **E29**.
+
+### 3.7 The shim defined the stack canary on the architectures whose loader owns it
+
+Found outside this repository's own suite, which is the part worth reading:
+chromium built as an anylinux AppImage crashed on aarch64, only there and
+only with the preload present, and its GPU process died with SIGSEGV under
+`CROSS_LIBC_DLOPEN=0` too (issue #37). The switch is irrelevant because the
+damage is done at relocation time, before any of the loader's own code runs.
+
+The generated shim emitted `__stack_chk_guard` as a function stub. The name
+is a musl-only symbol against the x86-64 floor, which is what the generator
+consulted for its type, so it became a `SHIM(void)` stub. But on every glibc
+architecture without `THREAD_SET_STACK_GUARD` the dynamic loader itself
+exports that name as a process-wide data object, the stack canary, and
+writes it in `security_init()`. Measured against the floor libc packages
+(`libc6-<target>-cross` 2.31, and trixie's for loongarch64):
+
+| target | loader exports `__stack_chk_guard` | consequence |
+|---|---|---|
+| x86_64 | no, the canary is `%fs:0x28` | unaffected, and the shim's definition is load-bearing for musl guests |
+| ppc64le | no, the canary is in the TCB | the same |
+| aarch64 | yes, `ld-linux-aarch64.so.1` | the interposition |
+| riscv64 | yes, `ld-linux-riscv64-lp64d.so.1` | the interposition |
+| loongarch64 | yes, `ld-linux-loongarch-lp64d.so.1` | the interposition |
+
+An unversioned definition in a preload wins the dynamic lookup for a
+versioned reference, so every `__stack_chk_guard` GOT slot in the process,
+`libc.so.6`'s own included, bound the shim's stub in read-only `.text`
+instead of the object the loader initializes. Canary reads then disagreed
+across the process and chromium's GPU process died before any cross-libc
+code ran.
+
+**Fix, in three layers.** The generator excludes the name on the
+architectures whose loader exports it and emits it as zeroed data of the
+real size where it is needed, because the merged kind table, not the x86
+target's, owns the type. `scripts/verify-artifacts.sh` re-measures every
+build against the target's own `libc.so.6` and loader and refuses any
+exported name shared with them, beyond the audited interpositions. **E102**
+is the suite's case, and on the aarch64 runner it is the case that failed
+before this fix and passes after; on the x86-64 runner it passes both ways,
+because that libc exports no such name, and it still guards that row against
+a collision of the same shape.
 
 ---
 
