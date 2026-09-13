@@ -38,8 +38,8 @@ preload definition wins every lookup in the process, `libc.so.6`'s own
 included. Chromium's GPU process died with SIGSEGV under the preload with the
 feature switch off; x86-64 and ppc64le were never affected, because their
 loaders keep the canary in thread storage and never export the name.
-[../report/03](report/03-defects-found-by-measurement.md) 3.7 has the whole
-chain with the measurement table.
+[../report/03](../report/03-defects-found-by-measurement.md) 3.7 has the
+whole chain with the measurement table.
 
 Three layers, all on this branch:
 

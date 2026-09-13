@@ -193,10 +193,15 @@ if [ -f "$DIR/cross-libc-dlopen.so" ]; then
 			grep -vxF -f "$DIR/.cld-exempt.$$" || true)
 		rm -f "$DIR/.cld-exempt.$$"
 		if [ -n "$hits" ]; then
-			for h in $hits; do
-				bad "cross-libc-dlopen.so exports '$h', which the target libc
-      family also exports. A preload definition wins every lookup for it,
-      the loader's own included. Issue #37."
+			bad "cross-libc-dlopen.so exports names the target libc family also
+      exports. A preload definition wins every lookup for each of them,
+      the loader's own included. Issue #37. The shared names, verbatim:"
+			# IFS= read, not a for over the unquoted variable: a name with a
+			# space in it once printed as its own last word and named nothing.
+			printf '%s\n' "$hits" | while IFS= read -r h; do
+				printf '        %s\n' "$h"
+				readelf --dyn-syms -W "$DIR/cross-libc-dlopen.so" 2>/dev/null |
+					grep -F " $h" | sed 's/^/   so: /'
 			done
 		else
 			say "cross-libc-dlopen.so: no name reexported from the target libc family"
