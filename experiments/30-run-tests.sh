@@ -541,7 +541,11 @@ else
     host_libc="/lib/$TRIPLET/libc.so.6"
     [ -f "$host_libc" ] || host_libc="/usr/lib/$TRIPLET/libc.so.6"
     defined_names() {
+        # The [<localentry>: 8] column PPC64 ELFv2 readelf prints between
+        # visibility and index is stripped for the same reason as in
+        # scripts/verify-artifacts.sh: unstripped, every name parses as 8].
         readelf --dyn-syms -W "$@" 2>/dev/null |
+            sed 's/\[<localentry>:[^]]*\]//' |
             awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") &&
                  $6 == "DEFAULT" { n = $8; sub(/@.*/, "", n); print n }' |
             sort -u

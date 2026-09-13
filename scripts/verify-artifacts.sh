@@ -111,6 +111,13 @@ defined_names() {
 	# function that read only the first member once measured a whole gate
 	# against libc.so.6 alone and reported the loader's own canary absent.
 	readelf --dyn-syms -W "$@" 2>/dev/null |
+	# PPC64 ELFv2 readelf prints a st_other annotation, [<localentry>: 8],
+	# between the visibility and the index, which shifts the name out of
+	# column 8 and once made every name parse as the two characters 8].
+	# Stripped before the columns are read. Measured on the bullseye cross
+	# binutils; newer binutils on x86-64 print no such column for the same
+	# file, which is why a local rehearsal of this gate saw nothing.
+	sed 's/\[<localentry>:[^]]*\]//' | \
 		awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") &&
 		     $6 == "DEFAULT" { n = $8; sub(/@.*/, "", n); print n }' |
 		sort -u
